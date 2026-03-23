@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Gelişmiş Chat | Silme Özellikli</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, system-ui, sans-serif; }
+        body { background: #efe7dd; height: 100vh; display: flex; justify-content: center; align-items: center; overflow: hidden; }
+        #app-container { width: 100%; height: 100%; max-width: 500px; background: white; display: none; flex-direction: column; position: relative; }
+        .chat-header { padding: 15px; background: #f0f2f5; border-bottom: 1px solid #ddd; display: flex; flex-direction: column; z-index: 10; }
+        #messages-list { flex: 1; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 5px; background-image: url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png'); }
+        .msg { padding: 8px 12px; border-radius: 12px; max-width: 80%; font-size: 15px; position: relative; cursor: pointer; }
+        .my-msg { align-self: flex-end; background: #dcf8c6; border-bottom-right-radius: 2px; }
+        .their-msg { align-self: flex-start; background: white; border-bottom-left-radius: 2px; }
+        .msg-meta { display: flex; align-items: center; justify-content: flex-end; gap: 3px; margin-top: 3px; font-size: 10px; color: #667781; }
+        .seen-tick { color: #53bdeb; }
+        .input-area { padding: 10px; background: #f0f2f5; display: flex; gap: 8px; align-items: center; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+        #msg-input { flex: 1; border-radius: 20px; border: 1px solid #ddd; padding: 12px 15px; outline: none; font-size: 16px; }
+        #send-btn { background: #008069; color: white; border: none; width: 45px; height: 45px; border-radius: 50%; font-size: 20px; }
+        .hidden { display: none !important; }
+        #auth-panel { width: 90%; max-width: 350px; background: white; padding: 25px; border-radius: 15px; text-align: center; }
+        .sidebar-btn { position: absolute; left: 10px; top: 15px; z-index: 20; background: #008069; color: white; border: none; padding: 5px 10px; border-radius: 5px; }
+    </style>
+</head>
+<body>
+
+<div id="auth-panel">
+    <h2 style="color:#008069; margin-bottom:15px;">Hoş Geldiniz</h2>
+    <input type="text" id="username-field" class="hidden" placeholder="Kullanıcı Adı">
+    <input type="email" id="email-field" placeholder="E-posta">
+    <input type="password" id="pass-field" placeholder="Şifre">
+    <button id="auth-action-btn" style="background:#008069; color:white; padding:12px; width:100%; border:none; border-radius:8px; margin-top:10px;">Giriş / Kayıt</button>
+    <p id="switch-auth" style="font-size:12px; margin-top:15px; color:blue; cursor:pointer;">Kayıt Ol</p>
+</div>
+
+<div id="app-container">
+    <button class="sidebar-btn" onclick="toggleSidebar()">Kişiler</button>
+    <div id="side-menu" class="hidden" style="position:fixed; left:0; top:0; width:80%; height:100%; background:white; z-index:100; padding:20px; box-shadow: 5px 0 15px rgba(0,0,0,0.1);">
+        <h3>Kişiler</h3>
+        <input type="text" id="search-friend" placeholder="Arkadaş ara..." style="width:100%; padding:8px; margin-top:10px;">
+        <button id="add-btn" style="width:100%; margin-top:5px; background:#25d366; color:white; border:none; padding:8px;">Ekle</button>
+        <div id="friends-list" style="margin-top:15px;"></div>
+        <button onclick="toggleSidebar()" style="margin-top:20px; width:100%; padding:10px;">Kapat</button>
+        <button id="logout-btn" style="background:#cc0000; color:white; width:100%; margin-top:10px; padding:10px; border:none;">Çıkış</button>
+    </div>
+
+    <div class="chat-window" style="display:flex; flex-direction:column; height:100%;">
+        <div class="chat-header">
+            <span id="active-friend-name" style="font-weight:bold; margin-left: 60px;">Sohbet Seçin</span>
+            <span id="typing-info" style="margin-left: 60px; font-size:12px; color:green;"></span>
+        </div>
+        <div id="messages-list"></div>
+        <div class="input-area hidden" id="chat-controls">
+            <input type="text" id="msg-input" placeholder="Mesaj..." autocomplete="off">
+            <button id="send-btn">➤</button>
+        </div>
+    </div>
+</div>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.17.1/firebase-app.js";
+    import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/9.17.1/firebase-auth.js";
+    import { getFirestore, doc, setDoc, getDoc, collection, addDoc, serverTimestamp, query, orderBy, onSnapshot, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/9.17.1/firebase-firestore.js";
+
+    const firebaseConfig = {
+        apiKey: "AIzaSyBL_aI-QpsepJL_bDOIsbkQpMusm-VTPbw",
+        authDomain: "whats-58583.firebaseapp.com",
+        projectId: "whats-58583",
+        storageBucket: "whats-58583.firebasestorage.app",
+        messagingSenderId: "275257976554",
+        appId: "1:275257976554:web:4266bde4668056a605d993"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    let currentRoomId = null;
+    let myData = null;
+
+    window.toggleSidebar = () => document.getElementById('side-menu').classList.toggle('hidden');
+
+    document.getElementById('switch-auth').onclick = function() {
+        const isLogin = document.getElementById('username-field').classList.contains('hidden');
+        document.getElementById('username-field').classList.toggle('hidden', !isLogin);
+        this.innerText = isLogin ? "Zaten üye misin? Giriş Yap" : "Hesabın yok mu? Kayıt Ol";
+    };
+
+    document.getElementById('auth-action-btn').onclick = async () => {
+        const email = document.getElementById('email-field').value;
+        const pass = document.getElementById('pass-field').value;
+        const isReg = !document.getElementById('username-field').classList.contains('hidden');
+        try {
+            if (isReg) {
+                const nick = document.getElementById('username-field').value;
+                const res = await createUserWithEmailAndPassword(auth, email, pass);
+                await setDoc(doc(db, "users", res.user.uid), { username: nick, uid: res.user.uid, typingIn: "" });
+                await setDoc(doc(db, "usernames", nick), { uid: res.user.uid });
+            } else { await signInWithEmailAndPassword(auth, email, pass); }
+        } catch (e) { alert(e.message); }
+    };
+
+    onAuthStateChanged(auth, async (user) => {
+        if (user) {
+            const snap = await getDoc(doc(db, "users", user.uid));
+            myData = snap.data();
+            document.getElementById('auth-panel').style.display = 'none';
+            document.getElementById('app-container').style.display = 'flex';
+            loadFriends();
+        } else {
+            document.getElementById('auth-panel').style.display = 'block';
+            document.getElementById('app-container').style.display = 'none';
+        }
+    });
+
+    document.getElementById('add-btn').onclick = async () => {
+        const name = document.getElementById('search-friend').value;
+        const snap = await getDoc(doc(db, "usernames", name));
+        if(snap.exists()){
+            await setDoc(doc(db, "users", auth.currentUser.uid, "friends", snap.data().uid), { username: name, uid: snap.data().uid });
+            toggleSidebar();
+        } else alert("Bulunamadı.");
+    };
+
+    function loadFriends() {
+        onSnapshot(collection(db, "users", auth.currentUser.uid, "friends"), (snap) => {
+            const list = document.getElementById('friends-list');
+            list.innerHTML = "";
+            snap.forEach(d => {
+                const div = document.createElement('div');
+                div.style = "padding:12px; background:#f9f9f9; margin-bottom:5px; border-radius:5px; cursor:pointer;";
+                div.innerText = "👤 " + d.data().username;
+                div.onclick = () => { openChat(d.data()); toggleSidebar(); };
+                list.appendChild(div);
+            });
+        });
+    }
+
+    function openChat(friend) {
+        currentRoomId = [auth.currentUser.uid, friend.uid].sort().join("_");
+        document.getElementById('active-friend-name').innerText = friend.username;
+        document.getElementById('chat-controls').classList.remove('hidden');
+
+        onSnapshot(doc(db, "users", friend.uid), (doc) => {
+            document.getElementById('typing-info').innerText = (doc.data().typingIn === currentRoomId) ? "yazıyor..." : "";
+        });
+
+        const q = query(collection(db, "chats", currentRoomId, "messages"), orderBy("timestamp", "asc"));
+        onSnapshot(q, (snap) => {
+            const area = document.getElementById('messages-list');
+            area.innerHTML = "";
+            snap.forEach((m) => {
+                const data = m.data();
+                if(data.sender !== auth.currentUser.uid && !data.seen) updateDoc(doc(db, "chats", currentRoomId, "messages", m.id), { seen: true });
+                const time = data.timestamp ? data.timestamp.toDate().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : "";
+                const div = document.createElement('div');
+                div.className = `msg ${data.sender === auth.currentUser.uid ? 'my-msg' : 'their-msg'}`;
+                div.innerHTML = `${data.text}<div class="msg-meta">${time} ${data.sender === auth.currentUser.uid ? (data.seen ? '<span class="seen-tick">✓✓</span>' : '✓✓') : ''}</div>`;
+                
+                // --- SİLME ÖZELLİĞİ ---
+                if(data.sender === auth.currentUser.uid) {
+                    div.onclick = () => { if(confirm("Mesajı silmek istiyor musun?")) deleteDoc(doc(db, "chats", currentRoomId, "messages", m.id)); };
+                }
+                
+                area.appendChild(div);
+            });
+            area.scrollTop = area.scrollHeight;
+        });
+    }
+
+    document.getElementById('send-btn').onclick = async () => {
+        const input = document.getElementById('msg-input');
+        if(!input.value) return;
+        await addDoc(collection(db, "chats", currentRoomId, "messages"), { text: input.value, sender: auth.currentUser.uid, timestamp: serverTimestamp(), seen: false });
+        input.value = "";
+        updateTyping(false);
+    };
+
+    async function updateTyping(s) { await updateDoc(doc(db, "users", auth.currentUser.uid), { typingIn: s ? currentRoomId : "" }); }
+    document.getElementById('msg-input').oninput = () => { updateTyping(true); clearTimeout(window.tT); window.tT = setTimeout(() => updateTyping(false), 2000); };
+    document.getElementById('logout-btn').onclick = () => signOut(auth);
+</script>
+</body>
+</html>
